@@ -4,34 +4,139 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🕓 Calcolo Ore Lavoro</title>
-    <link rel="manifest" href="manifest.json">
-    <link rel="stylesheet" href="style.css">
-    <script>
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('service-worker.js')
-          .then(() => console.log('Service Worker registrato'))
-          .catch(err => console.log('Errore Service Worker:', err));
-      }
-    </script>
+    <style>
+        body { font-family: sans-serif; max-width: 400px; margin: 20px auto; padding: 10px; }
+        h1 { text-align: center; }
+        input { width: 90%; padding: 5px; margin: 5px 0; }
+        button { margin: 5px 5px 5px 0; padding: 5px 10px; }
+        .section { border-top: 1px solid #ccc; padding-top: 15px; margin-top: 15px; }
+        .result { margin-top: 10px; white-space: pre-line; }
+        .list { margin-top: 5px; }
+    </style>
 </head>
 <body>
-    <h1>🕓 Calcolo Ore Lavoro e Guida</h1>
+    <h1>🕓 Calcolo Ore di Lavoro e Guida</h1>
 
-    <div id="lavoro">
-        <input type="text" id="inizio" placeholder="Orario inizio HH:mm">
-        <input type="text" id="fine" placeholder="Orario fine HH:mm">
+    <div class="section">
+        <h2>Lavoro</h2>
+        <input id="inizio" placeholder="Orario inizio (HH:mm)">
+        <input id="fine" placeholder="Orario fine (HH:mm)">
+        <br>
         <button onclick="calcolaLavoro()">Calcola Ore Lavoro</button>
-        <pre id="risultatoLavoro"></pre>
+        <div id="risultatoLavoro" class="result"></div>
     </div>
 
-    <div id="guida">
-        <input type="text" id="nuovaTratta" placeholder="Nuova tratta HH:mm-HH:mm">
+    <div class="section">
+        <h2>🚗 Ore di Guida</h2>
+        <input id="nuovaTratta" placeholder="Nuova tratta (es: 09:15-11:00)">
+        <br>
         <button onclick="aggiungiTratta()">Aggiungi tratta</button>
-        <button onclick="rimuoviTutto()">Rimuovi tutto</button>
-        <div id="tratteElenco"></div>
-        <pre id="risultatoGuida"></pre>
+        <button onclick="rimuoviTutteTratte()" style="color:red;">Rimuovi tutto</button>
+        <div id="listaTratte" class="list"></div>
+        <div id="risultatoGuida" class="result"></div>
     </div>
 
-    <script src="script.js"></script>
+    <script>
+        let tratteGuida = [];
+
+        function parseTime(str) {
+            let parts = str.split(':');
+            if (parts.length !== 2) return null;
+            return { h: parseInt(parts[0]), m: parseInt(parts[1]) };
+        }
+
+        function minutesBetween(start, end) {
+            let startMin = start.h*60 + start.m;
+            let endMin = end.h*60 + end.m;
+            return endMin >= startMin ? endMin - startMin : 24*60 - startMin + endMin;
+        }
+
+        function calcolaOrari(inizio, fine) {
+            let tot = minutesBetween(inizio, fine);
+            let notturne = 0;
+            let currentH = inizio.h;
+            let currentM = inizio.m;
+            for (let i=0; i<tot; i++) {
+                if (currentH >= 22 || currentH < 6) notturne++;
+                currentM++;
+                if (currentM === 60) { currentM=0; currentH++; if(currentH===24) currentH=0; }
+            }
+            return { tot, notturne, diurne: tot - notturne };
+        }
+
+        function formatDuration(min) {
+            return Math.floor(min/60) + 'h ' + (min%60).toString().padStart(2,'0') + 'm';
+        }
+
+        function minutiInFascia(inizio, fine, fasciaStart, fasciaEnd) {
+            let startMin = Math.max(inizio.h*60+inizio.m, fasciaStart.h*60+fasciaStart.m);
+            let endMin = Math.min(fine.h*60+fine.m, fasciaEnd.h*60+fasciaEnd.m);
+            return Math.max(0, endMin-startMin);
+        }
+
+        function calcolaBuoniPasto(inizio, fine) {
+            let totMinuti = minutesBetween(inizio, fine);
+            let pranzoStart = {h:11,m:0}, pranzoEnd={h:15,m:0};
+            let cenaStart = {h:18,m:0}, cenaEnd={h:22,m:0};
+            let minutiPranzo = minutiInFascia(inizio, fine, pranzoStart, pranzoEnd);
+            let minutiCena = minutiInFascia(inizio, fine, cenaStart, cenaEnd);
+
+            if (totMinuti > 8*60 || (minutiPranzo >= 120 && minutiCena >= 120)) return 2;
+            if (totMinuti > 6*60 || minutiPranzo >= 120 || minutiCena >= 120) return 1;
+            return 0;
+        }
+
+        function calcolaLavoro() {
+            let inizioVal = parseTime(document.getElementById('inizio').value);
+            let fineVal = parseTime(document.getElementById('fine').value);
+            if (!inizioVal || !fineVal) {
+                document.getElementById('risultatoLavoro').textContent = "⚠️ Formato orario non valido (usa HH:mm)";
+                return;
+            }
+            let r = calcolaOrari(inizioVal, fineVal);
+            let buoni = calcolaBuoniPasto(inizioVal, fineVal);
+            document.getElementById('risultatoLavoro').textContent =
+                `Totale lavorate: ${formatDuration(r.tot)}\nOre diurne: ${formatDuration(r.diurne)}\nOre notturne: ${formatDuration(r.notturne)}\nBuoni pasto: ${buoni}`;
+        }
+
+        function calcolaGuida() {
+            let totale = 0;
+            for (let tratta of tratteGuida) {
+                let parti = tratta.split('-');
+                if (parti.length === 2) {
+                    let start = parseTime(parti[0].trim());
+                    let end = parseTime(parti[1].trim());
+                    if (start && end) totale += minutesBetween(start,end);
+                }
+            }
+            document.getElementById('risultatoGuida').textContent = "Totale ore di guida: " + formatDuration(totale);
+        }
+
+        function aggiornaListaTratte() {
+            let listaDiv = document.getElementById('listaTratte');
+            listaDiv.innerHTML = "";
+            tratteGuida.forEach(t => {
+                let p = document.createElement('p');
+                p.textContent = "• " + t;
+                listaDiv.appendChild(p);
+            });
+        }
+
+        function aggiungiTratta() {
+            let tratta = document.getElementById('nuovaTratta').value.trim();
+            if (tratta) {
+                tratteGuida.push(tratta);
+                document.getElementById('nuovaTratta').value = "";
+                aggiornaListaTratte();
+                calcolaGuida();
+            }
+        }
+
+        function rimuoviTutteTratte() {
+            tratteGuida = [];
+            aggiornaListaTratte();
+            document.getElementById('risultatoGuida').textContent = "";
+        }
+    </script>
 </body>
 </html>
